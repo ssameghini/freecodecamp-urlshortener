@@ -14,8 +14,13 @@ const dns = require('dns');
 const mongoose = require('mongoose');
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true});
 const db = mongoose.connection;
-db.on('error', console.error.bind(console, 'connection error'));
-db.once('open', console.log('Mongoose connection succesfull!'));
+db.on('error', function() {
+  console.error('Database not connected!');
+});
+db.once('open', function(){
+  console.log('Connection succeeded!');
+  return;
+});
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
@@ -32,14 +37,13 @@ app.get('/', function(req, res) {
 // My URL-shortener API
 const urlShortenedSchema = new mongoose.Schema({
   url: String,
-  hash: String,
+  address: String,
   short: Number
 });
 const ShortenedUrl = mongoose.model('ShortenedUrl', urlShortenedSchema);
 
-const urlsShortened = [];
-
-// Submit a new URL, validate and shorten
+// Submit a new URL, validate, shorten and upload
+// All 'console.log' tests where commented to get out of scene
 app.post('/api/shorturl/new', function(req, res) {
   let originalURL = req.body.url;
   if (/^https:\/\//.test(originalURL)) {
@@ -47,28 +51,50 @@ app.post('/api/shorturl/new', function(req, res) {
   } else if (/^http:\/\//.test(originalURL)) {
     originalURL = originalURL.replace(/^http:\/\//, '');
   }
-  dns.lookup(originalURL, function(err, address, family) {
+  dns.lookup(originalURL, async function(err, address) {
     if (err) {
       res.json({ error: 'invalid url' });
     } else if (address) {
-      if (urlsShortened.includes(originalURL)) {
-        res.json({original_url: "https://" + originalURL, short_url: urlsShortened.indexOf(originalURL) + 1});
-        console.log(urlsShortened);
-      } else {
-        urlsShortened.push(originalURL);
-        res.json({original_url: "https://" + originalURL, short_url: urlsShortened.indexOf(originalURL) + 1})
-        console.log(urlsShortened);
+      // console.log(address);
+      let doc;
+      try {
+        doc = await ShortenedUrl.findOne({address: address});
+        if (doc === null) {
+          let newDocumentIndex = await ShortenedUrl.estimatedDocumentCount((err, count) => count + 1);
+          // console.log(newDocumentIndex);
+          doc = new ShortenedUrl({
+            url: originalURL,
+            address: address,
+            short: newDocumentIndex
+          });
+          doc = await doc.save();
+          // console.log(doc);
+          res.json({original_url: "https://" + originalURL, short_url: doc.short });
+        } else if (doc) {
+          res.json({original_url: "https://" + originalURL, short_url: doc.short });
+          // console.log(doc);
+        }
+      }
+      catch(e) {
+        console.error(e);
       }
     }
   });
 });
 
-app.get('/api/shorturl/:number', function(req, res) {
-  let indexOfURL = req.params.number - 1;
-  let redirectTo = urlsShortened[indexOfURL];
-  redirectTo = "https://" + redirectTo;
-  console.log(redirectTo);
-  res.status(301).redirect(redirectTo);
+app.get('/api/shorturl/:number', async function(req, res) {
+  let indexOfURL = req.params.number;
+  let doc;
+  try {
+    doc = await ShortenedUrl.findOne({ short: indexOfURL });
+    let redirectTo = "https://" + doc.url;
+    // console.log(redirectTo);
+    res.status(301).redirect(redirectTo);
+  }
+  catch(err) {
+    // console.error(err);
+    res.json({error: 'invalid URL'});
+  }
 });
 
 // Your first API endpoint
