@@ -38,9 +38,21 @@ app.get('/', function(req, res) {
 const urlShortenedSchema = new mongoose.Schema({
   url: String,
   address: String,
+  hash: String,
   short: Number
 });
 const ShortenedUrl = mongoose.model('ShortenedUrl', urlShortenedSchema);
+
+String.prototype.hashCode = function() {
+  var hash = 0, i, chr;
+  if (this.length === 0) return hash;
+  for (i = 0; i < this.length; i++) {
+    chr   = this.charCodeAt(i);
+    hash  = ((hash << 5) - hash) + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash;
+};
 
 // Submit a new URL, validate, shorten and upload
 // All 'console.log' tests where commented to get out of scene
@@ -57,14 +69,17 @@ app.post('/api/shorturl/new', function(req, res) {
     } else if (address) {
       // console.log(address);
       let doc;
+      let hash = originalURL.hashCode();
       try {
-        doc = await ShortenedUrl.findOne({address: address});
+        doc = await ShortenedUrl.findOne({hash: hash});
         if (doc === null) {
-          let newDocumentIndex = await ShortenedUrl.estimatedDocumentCount((err, count) => count + 1);
+          let newDocumentIndex = await ShortenedUrl.estimatedDocumentCount((err, count) => count);
+          newDocumentIndex++;
           // console.log(newDocumentIndex);
           doc = new ShortenedUrl({
             url: originalURL,
             address: address,
+            hash: hash,
             short: newDocumentIndex
           });
           doc = await doc.save();
